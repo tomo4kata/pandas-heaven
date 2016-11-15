@@ -1,68 +1,70 @@
 education.py
 
 from bs4 import BeautifulSoup
+import matplotlib.pyplot as plt
 import requests
-import pandas as pd
-import numpy as np
-import sqlite3 as lite
+import pandas
+import numpy
 import csv
 
 url = "http://web.archive.org/web/20110514112442/http://unstats.un.org/unsd/demographic/products/socind/education.htm"
+raw_data = requests.get(url)
+soup_data = BeautifulSoup(raw_data.content, "lxml")
+soup_tag = soup_data('table')[6].tr.td
+soup_table = soup_tag('table')[1].tr.td.div
+raw_table = soup_table('table')[0]
 
-r = requests.get(url)
-soup = BeautifulSoup(r.content, "lxml")
+col_name = []
+for child in raw_table('tr'): 
+    if child.get('class', ['Null'])[0] == 'lheader': 
+        for td in child.find_all('td'): 
+            if td.get_text() != '': 
+                col_name.append(td.get_text())
+        break
+country_table = pandas.DataFrame(columns = col_name)
 
-for row in soup('table'):
-    print(row)
+edu_row_num = 0
+for child in raw_table('tr'):
+    row_curr = []
+    if child.get('class', ['Null']) == 'tcont':
+        row_curr.append(child.find('td').get_text())
+        for td in child.find_all('td')[1:]: 
+            if td.get('align'): 
+                row_curr.append(td.get_text())
+    else: 
+        row_curr.append(child.find('td').get_text())
+        for td in child.find_all('td')[1:]:
+            if td.get('align'): 
+                row_curr.append(td.get_text())
+    if len(row_curr) == len(col_name): 
+        country_table.loc[edu_row_num] = row_curr
+        edu_row_num += 1
+country_table[['Total','Men', 'Women']] = country_table[['Total','Men', 'Women']].convert_objects(convert_numeric = True)
 
-soup('table')[6]
-
-A = soup('table')[6].findAll('tr', {'class': 'tcont'})
-B = [x for x in A if len(x)== 25] # removing records without value
-
-records = []
-for rows in B:
-    col = rows.findAll('td')
-    country = col[0].string
-    year = col[1].string
-    total = col[4].string
-    men = col[7].string
-    women = col[10].string
-    record = (country, year, total, men, women)
-    records.append(record)
-column_name = ['country', 'year', 'total_schoollife', 'men_schoollife', 'women_schoollife']
-table_schoollife = pd.DataFrame(records, columns = column_name )
-table_schoollife=table_schoollife.dropna(axis=1,how='all')
-
-con = lite.connect('/Users/Tomo/thinkful/education.db')
-cur = con.cursor()
-
-with con:
-    cur.execute("DROP TABLE IF EXISTS gdp")
-    cur.execute('CREATE TABLE gdp (country REAL, GDP_1999 INT, GDP_2000 INT, GDP_2001 INT, GDP_2002 INT, GDP_2003 INT, GDP_2004 INT, GDP_2005 INT, GDP_2006 INT, GDP_2007 INT, GDP_2008 INT, GDP_2009 INT, GDP_2010 INT);')
-
+country_gdp = pandas.DataFrame(columns = ['country_name', '1999', '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010'])
 with open('/Users/Tomo/thinkful/world_bank_data/Metadata_Indicator_v2.csv','rU') as inputFile:
-    next(inputFile) # skip the first two lines
     next(inputFile)
     header = next(inputFile)
     inputReader = csv.reader(inputFile)
+    gdp_row_num = 0
     for line in inputReader:
-        with con:
-            cur.execute('INSERT INTO gdp (country_name, _1999, _2000, _2001, _2002, _2003, _2004, _2005, _2006, _2007, _2008, _2009, _2010) VALUES ("' + line[0] + '","' + '","'.join(line[42:-5]) + '");')
+        row_curr = [line[0]]
+        row_curr.extend(line[43:-5])
+        country_gdp.loc[gdp_row_num] = row_curr
+        gdp_row_num += 1
+country_gdp[country_gdp.columns[1:-1]] = country_gdp[country_gdp.columns[1:-1]].convert_objects(convert_numeric = True)
 
-# /Users/Tomo/anaconda/envs/py35/bin/ipython:1: DeprecationWarning: 'U' mode is deprecated
-  #!/bin/bash /Users/Tomo/anaconda/envs/py35/bin/python.app
-#---------------------------------------------------------------------------
-#StopIteration                             Traceback (most recent call last)
-#<ipython-input-20-559db1e4427b> in <module>()
-#      2     next(inputFile) # skip the first two lines
-#      3     next(inputFile)
-#----> 4     header = next(inputFile)
-#      5     inputReader = csv.reader(inputFile)
-#      6     for line in inputReader:
-
-#StopIteration: 
-
+country_table['GDP'] = numpy.nan
+for i in range(edu_row_num): 
+    find_index = country_gdp[country_gdp['country_name'] == country_table['Country or area'][i]].index
+    if len(find_index) > 0: 
+        row_index = find_index.tolist()[0]
+        country_table['GDP'][i] = country_gdp[country_table['Year'][i]][row_index]
+edu_gdp = country_table[numpy.isfinite(country_table['GDP'])][['Country or area', 'Total', 'GDP']]
+edu_gdp = edu_gdp.astype(float)
+edu_gdp['log_GDP'] = numpy.log(edu_gdp['GDP'])
+edu_gdp.plot(kind = 'scatter', x = 'Total', y = 'log_GDP')
+plt.show()
 
 
 
